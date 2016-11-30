@@ -1,6 +1,7 @@
 // PdfRaster.c - functions to write PDF/raster
 //
 #include <assert.h>
+#include <string.h>
 
 #include "PdfRaster.h"
 #include "PdfDict.h"
@@ -12,6 +13,9 @@
 #include "PdfStandardObjects.h"
 #include "PdfImage.h"
 #include "PdfArray.h"
+#include "PdfSecurityHandler.h"
+
+
 
 
 typedef struct t_pdfrasencoder {
@@ -507,6 +511,57 @@ int pdfr_encoder_page_count(t_pdfrasencoder* enc)
 	}
 	return pageCount;
 }
+
+void pdfr_encoder_set_AES256_encrypter(t_pdfrasencoder* enc, const char* user_password, const char* owner_password, pdint32 perms)
+{
+  //todo rt 
+  //todo EncryptMetadata
+
+  t_pdencrypter *encrypter = pd_encrypt_new(enc->pool, NULL);
+  pd_outstream_set_encrypter(enc->stm, encrypter);
+
+  // Encrypt dictionary goes to trailer
+  t_pdvalue stdcfDict = pd_dict_new(enc->pool, 3);
+  pd_dict_put(stdcfDict, ((t_pdatom)"Type"), pdatomvalue((t_pdatom)"CryptFilter"));
+  pd_dict_put(stdcfDict, ((t_pdatom)"Length"), pdintvalue(32));
+  pd_dict_put(stdcfDict, ((t_pdatom)"CFM"), pdatomvalue((t_pdatom)"AESV3"));
+
+  t_pdvalue cfDict = pd_dict_new(enc->pool, 1);
+  pd_dict_put(cfDict, ((t_pdatom)"StdCF"), stdcfDict);
+
+  t_pdvalue encrypt = pd_dict_new(enc->pool, 13);
+  t_pdvalue encryptref = pd_xref_makereference(enc->xref, encrypt);
+  encrypter->id_encrypt = pd_reference_object_number(encryptref);
+  
+  pd_dict_put(enc->trailer, ((t_pdatom)"Encrypt"), encryptref);
+
+  pd_dict_put(encrypt, ((t_pdatom)"Length"), pdintvalue(256));
+  pd_dict_put(encrypt, ((t_pdatom)"Filter"), pdatomvalue((t_pdatom)"Standard"));
+  pd_dict_put(encrypt, ((t_pdatom)"EncryptMetadata"), pdboolvalue(PD_FALSE));
+  pd_dict_put(encrypt, ((t_pdatom)"V"), pdintvalue(5));
+  pd_dict_put(encrypt, ((t_pdatom)"R"), pdintvalue(6));
+  pd_dict_put(encrypt, ((t_pdatom)"P"), pdintvalue(perms));
+  pd_dict_put(encrypt, ((t_pdatom)"StrF"), pdatomvalue((t_pdatom)"StdCF"));
+  pd_dict_put(encrypt, ((t_pdatom)"StmF"), pdatomvalue((t_pdatom)"StdCF"));
+  pd_dict_put(encrypt, ((t_pdatom)"CF"), cfDict);
+
+  //todo - calculate AES256 specific values
+  pd_encrypt_compute_file_encryption_key(encrypter);
+  pd_encrypt_compute_Alg8(encrypter, user_password);
+  if (owner_password == NULL || strlen(owner_password) == 0)
+    pd_encrypt_compute_Alg9(encrypter, user_password);
+  else 
+    pd_encrypt_compute_Alg9(encrypter, owner_password);
+
+  pd_encrypt_compute_Alg10(encrypter, perms);
+
+  pd_dict_put(encrypt, ((t_pdatom)"O"), pdstringvalue(pd_string_new_binary(enc->pool, encrypter->o_length, encrypter->o)));
+  pd_dict_put(encrypt, ((t_pdatom)"OE"), pdstringvalue(pd_string_new_binary(enc->pool, encrypter->oe_length, encrypter->oe)));
+  pd_dict_put(encrypt, ((t_pdatom)"U"), pdstringvalue(pd_string_new_binary(enc->pool, encrypter->u_length, encrypter->u)));
+  pd_dict_put(encrypt, ((t_pdatom)"UE"), pdstringvalue(pd_string_new_binary(enc->pool, encrypter->ue_length, encrypter->ue)));
+  pd_dict_put(encrypt, ((t_pdatom)"Perms"), pdstringvalue(pd_string_new_binary(enc->pool, 16, encrypter->perms)));
+}
+
 
 long pdfr_encoder_bytes_written(t_pdfrasencoder* enc)
 {

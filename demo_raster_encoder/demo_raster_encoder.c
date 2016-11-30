@@ -16,6 +16,11 @@
 #include "color_strip2.h"
 #include "color_strip3.h"
 
+#include "openssl/crypto.h"
+#include "openssl/err.h"
+#include "openssl/pem.h"
+
+
 #define OUTPUT_FILENAME "raster.pdf"
 
 static void myMemSet(void *ptr, pduint8 value, size_t count)
@@ -200,6 +205,11 @@ int write_bitonal_uncompressed_file(t_OS os, const char *filename)
 	t_pdfrasencoder* enc = pdfr_encoder_create(PDFRAS_API_LEVEL, &os);
 	pdfr_encoder_set_creator(enc, "raster_encoder_demo 1.0");
 	pdfr_encoder_set_subject(enc, "BW 1-bit Uncompressed sample output");
+
+  //todo rt - how to init OpenSSL & apply security
+  ERR_load_crypto_strings();
+  OpenSSL_add_all_algorithms();
+  pdfr_encoder_set_AES256_encrypter(enc, "open", "master", 128);
 
 	write_bitonal_uncomp_page(enc);
 
@@ -623,29 +633,29 @@ int main(int argc, char** argv)
 
 	generate_image_data();
 
-	write_0page_file(os, "sample empty.pdf");
+//	write_0page_file(os, "sample empty.pdf");
 
 	write_bitonal_uncompressed_file(os, "sample bw1 uncompressed.pdf");
 
-	write_bitonal_ccitt_file(os, "sample bw1 ccitt.pdf", 0);
+	//write_bitonal_ccitt_file(os, "sample bw1 ccitt.pdf", 0);
 
-    write_bitonal_ccitt_file(os, "sample bitonal uncal.pdf", 1);
+ //   write_bitonal_ccitt_file(os, "sample bitonal uncal.pdf", 1);
 
-    write_gray8_uncompressed_file(os, "sample gray8 uncompressed.pdf");
+ //   write_gray8_uncompressed_file(os, "sample gray8 uncompressed.pdf");
 
-	write_gray8_jpeg_file(os, "sample gray8 jpeg.pdf");
+	//write_gray8_jpeg_file(os, "sample gray8 jpeg.pdf");
 
-	write_gray16_uncompressed_file(os, "sample gray16 uncompressed.pdf");
+	//write_gray16_uncompressed_file(os, "sample gray16 uncompressed.pdf");
 
-	write_rgb24_uncompressed_file(os, "sample rgb24 uncompressed.pdf");
+	//write_rgb24_uncompressed_file(os, "sample rgb24 uncompressed.pdf");
 
-	write_rgb24_uncompressed_multistrip_file(os, "sample rgb24 uncompressed multistrip.pdf");
+	//write_rgb24_uncompressed_multistrip_file(os, "sample rgb24 uncompressed multistrip.pdf");
 
-	write_rgb24_jpeg_file(os, "sample rgb24 jpeg.pdf");
+	//write_rgb24_jpeg_file(os, "sample rgb24 jpeg.pdf");
 
-	write_rgb24_jpeg_multistrip_file(os, "sample rgb24 jpeg multistrip.pdf");
+	//write_rgb24_jpeg_multistrip_file(os, "sample rgb24 jpeg multistrip.pdf");
 
-	write_allformat_multipage_file(os, "sample all formats.pdf");
+	//write_allformat_multipage_file(os, "sample all formats.pdf");
 
     printf("------------------------------\n");
     printf("Hit [enter] to exit:\n");

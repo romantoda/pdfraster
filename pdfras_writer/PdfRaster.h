@@ -189,6 +189,10 @@ long pdfr_encoder_bytes_written(t_pdfrasencoder* enc);
 // Do not use the enc pointer after this, it is invalid.
 void pdfr_encoder_destroy(t_pdfrasencoder* enc);
 
+//todo rt
+void pdfr_encoder_set_AES256_encrypter(t_pdfrasencoder* enc, const char* user_password, const char* owner_password, pdint32 perms);
+
+
 #ifdef __cplusplus
 }
 #endif

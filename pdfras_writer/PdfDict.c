@@ -171,10 +171,10 @@ void stream_free(t_pdvalue stream)
 void stream_write_data(t_pdvalue stream, t_datasink* sink)
 {
 	t_pdstream *stm = pd_dict_as_stream(stream);
-	if (stm && stm->contentWriter && sink) {
+  if (stm && stm->contentWriter && sink) {
 		// Call the Stream's content generator to write its contents
 		// to the sink (which presumably writes it to the outstream):
-		stm->contentWriter(sink, stm->contentCookie);
+    stm->contentWriter(sink, stm->contentCookie);
 	}
 }
 
