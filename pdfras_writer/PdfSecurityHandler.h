@@ -5,6 +5,10 @@
 #include "PdfOS.h"
 #include "PdfAlloc.h"
 
+extern pdbool is_digsig;
+extern pduint32 dig_sig_V_offset;
+extern pduint32 dig_sig_id;
+
 
 typedef struct t_pdencrypter {
   void*		cookie;			// data specific to a particular class of encrypter

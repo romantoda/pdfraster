@@ -10,7 +10,6 @@ extern "C" {
 #include "PdfDatasink.h"
 
 #define PDFRAS_API_LEVEL	1
-
 // Version of the file format we support (or at least, write)
 #define PDFRASTER_SPEC_VERSION "1.0"
 
@@ -191,6 +190,14 @@ void pdfr_encoder_destroy(t_pdfrasencoder* enc);
 
 //todo rt
 void pdfr_encoder_set_AES256_encrypter(t_pdfrasencoder* enc, const char* user_password, const char* owner_password, pdint32 perms);
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void pdfr_encoder_set_digital_signature(t_pdfrasencoder* enc, const char *certificate_file, const char* password);
+void pdfr_dig_sig_create_dictionaries(t_pdfrasencoder* enc);
+void pdfr_encoder_end_digital_signature(FILE* pdf_file);
 
 
 #ifdef __cplusplus

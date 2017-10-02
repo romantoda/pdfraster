@@ -9,11 +9,9 @@
 #include "PdfString.h"
 #include "PdfXrefTable.h"
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
 
 typedef struct t_pdoutstream {
   fOutputWriter writer;
@@ -474,6 +472,9 @@ void pd_write_reference_declaration(t_pdoutstream *stm, t_pdvalue ref)
           stm->encrypter = NULL;
       }
 
+      if (is_digsig && (onr == dig_sig_id))
+        dig_sig_V_offset = pd_outstream_pos(stm);
+
       pd_write_value(stm, pd_reference_get_value(ref));
 
       stm->encrypter = stored_encrypter;
@@ -540,5 +541,7 @@ void pd_write_endofdocument(t_pdoutstream *stm, t_pdxref *xref, t_pdvalue catalo
     if (!pd_value_eq(trailer, caller_trailer)) {
       pd_dict_free(trailer);
     }
+//rt Tu zapiseme Byterange + Content zabezpeceny
+
   }
 }

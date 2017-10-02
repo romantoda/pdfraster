@@ -1,8 +1,6 @@
-
 #include <string.h>
 #include "PdfSecurityHandler.h"
 #include "PdfAlloc.h"
-
 #include "openssl/crypto.h"
 #include "openssl/pem.h"
 #include "openssl/pkcs12.h"

@@ -209,15 +209,23 @@ int write_bitonal_uncompressed_file(t_OS os, const char *filename)
   //todo rt - how to init OpenSSL & apply security
   ERR_load_crypto_strings();
   OpenSSL_add_all_algorithms();
-  pdfr_encoder_set_AES256_encrypter(enc, "open", "master", 128);
-
-	write_bitonal_uncomp_page(enc);
-
+  //rt pdfr_encoder_set_AES256_encrypter(enc, "open", "master", 128);
+  pdfr_encoder_set_digital_signature(enc, "c:\\temp\\RomanToda(test).pfx", "openpassword");
+  write_bitonal_uncomp_page(enc);
 	// the document is complete
 	pdfr_encoder_end_document(enc);
-	// clean up
-	fclose(fp);
-	pdfr_encoder_destroy(enc);
+  // clean up
+  fclose(fp);
+
+  FILE *fp1 = fopen(filename, "r+b");
+  if (fp1 == 0) {
+    fprintf(stderr, "unable to open %s for reading\n", filename);
+    return 1;
+  }
+  pdfr_encoder_end_digital_signature(fp1);
+  fclose(fp1);
+
+  pdfr_encoder_destroy(enc);
     printf("  %s\n", filename);
     return 0;
 }

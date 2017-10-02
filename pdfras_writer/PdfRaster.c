@@ -1,5 +1,6 @@
 // PdfRaster.c - functions to write PDF/raster
 //
+
 #include <assert.h>
 #include <string.h>
 
@@ -15,8 +16,12 @@
 #include "PdfArray.h"
 #include "PdfSecurityHandler.h"
 
-
-
+#include "openssl/crypto.h"
+#include "openssl/pem.h"
+#include "openssl/pkcs12.h"
+#include "openssl/err.h"
+#include "openssl/md5.h"
+#include <openssl/rand.h>
 
 typedef struct t_pdfrasencoder {
 	t_pdmempool*		pool;
@@ -246,7 +251,12 @@ int pdfr_encoder_start_page(t_pdfrasencoder* enc, int width)
 	// Start a new page (of unknown height)
 	enc->currentPage = pd_page_new_simple(enc->pool, enc->xref, enc->catalog, W, 0);
 	assert(IS_REFERENCE(enc->currentPage));
-    assert(IS_DICT(pd_reference_get_value(enc->currentPage)));
+  assert(IS_DICT(pd_reference_get_value(enc->currentPage)));
+
+  //rt
+  if (is_digsig == PD_TRUE &&  dig_sig_id == -1) {
+    pdfr_dig_sig_create_dictionaries(enc);
+  }
 
 	return 0;
 }
@@ -563,6 +573,272 @@ void pdfr_encoder_set_AES256_encrypter(t_pdfrasencoder* enc, const char* user_pa
 }
 
 
+EVP_PKEY* digsig_pkey = NULL;
+X509* digsig_cert = NULL;
+pdbool is_digsig = PD_FALSE;
+pduint32 dig_sig_V_offset;
+pduint32 dig_sig_id=-1;
+
+// if out_buffer==NULL then only size is computed
+int DigitaSignature_SigData(unsigned char *in_buffer, int in_buffer_length, unsigned char *out_buffer)
+{
+  // signing buffer with certificate
+  int out_buffer_length = 0;
+  BIO* inputbio = BIO_new(BIO_s_mem());
+  BIO_write(inputbio, in_buffer, in_buffer_length );
+  PKCS7 *pkcs7;
+  int flags = PKCS7_DETACHED | PKCS7_BINARY;
+  pkcs7 = PKCS7_sign(digsig_cert, digsig_pkey, NULL, inputbio, flags);
+  BIO_free(inputbio);
+
+  // going to acquire encrypted data
+  if (pkcs7) {
+    BIO* outputbio = BIO_new(BIO_s_mem());
+    i2d_PKCS7_bio(outputbio, pkcs7);
+    BUF_MEM* mem = NULL;
+    BIO_get_mem_ptr(outputbio, &mem);
+    if (mem && mem->data && mem->length) {
+      // mem->length is supposed to be half of signed_len_in_hex
+      // because /Contents is written in hex (so 2 characters for each byte)
+      out_buffer_length = mem->length;
+      if (out_buffer) memcpy(out_buffer, mem->data, out_buffer_length);
+    }
+    BIO_free(outputbio);
+    PKCS7_free(pkcs7);
+  }
+  return out_buffer_length;
+}
+
+void pdfr_encoder_set_digital_signature(t_pdfrasencoder* enc, const char *certificate_file, const char* password)
+{
+    /*
+    << /ByteRange[0 27783 30321 527] 
+    /Contents<0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000>
+    /Type /Sig 
+    /Filter /Adobe.PPKLite 
+    /SubFilter /adbe.pkcs7.detached 
+    /Reason(???) 
+    /Location(??) 
+    /Name(??) 
+    /ContactInfo(roman.toda@gmail.com) 
+    /M(D : 20160428133243 + 02'00') >>
+
+    <</Type/Annot
+      /Subtype/Widget
+      /Rect[ 0 0 0 0]
+      /P 12 0 R 
+      /FT/Sig
+      /F 132
+      /T(Sig1)
+      /AP<</N 32 0 R >>
+      /V 33 0 R  >>
+    */
+  //t_pdencrypter *encrypter = pd_encrypt_new(enc->pool, NULL);
+  //pd_outstream_set_encrypter(enc->stm, encrypter);
+
+  PKCS12 *pkcs12;
+  FILE *pfx_file;
+  STACK_OF(X509)* ca = NULL;
+
+  // acquiring data from PFX certificate file
+  pfx_file = fopen(certificate_file, "rb");
+  if (!pfx_file)
+    return;
+  pkcs12 = d2i_PKCS12_fp(pfx_file, NULL);
+  fclose(pfx_file);
+  if (!pkcs12)
+    return;
+
+  if (!PKCS12_parse(pkcs12, password, &digsig_pkey, &digsig_cert, &ca)) {
+    PKCS12_free(pkcs12);
+    return;
+  }
+  PKCS12_free(pkcs12);
+
+  is_digsig = PD_TRUE;
+  dig_sig_id = -1;
+}
+
+// we need to create dictionaries only when we have first page
+void pdfr_dig_sig_create_dictionaries(t_pdfrasencoder* enc)
+{
+  pdbool succ;
+  // Create AcroForm entry in the Catalog
+  t_pdvalue acro_form = pd_dict_get(enc->catalog, (t_pdatom)"AcroForm", &succ);
+  if (!succ) {
+    acro_form = pd_dict_new(enc->pool, 2);
+    t_pdvalue acro_form_ref = pd_xref_makereference(enc->xref, acro_form);
+    pd_dict_put(enc->catalog, ((t_pdatom)"AcroForm"), acro_form_ref);
+  }
+
+  // Filling AcroForm
+  //rt check if SigFlags already exists (multiple signing?)
+  pd_dict_put(acro_form, ((t_pdatom)"SigFlags"), pdintvalue(3));
+
+  //Creating /Fields array
+  t_pdvalue fields = pd_dict_get(enc->catalog, (t_pdatom)"Fields", &succ);
+  if (!succ) {
+    fields = pdarrayvalue(pd_array_new(enc->pool, 2));
+    t_pdvalue fields_ref = pd_xref_makereference(enc->xref, fields);
+    pd_dict_put(acro_form, ((t_pdatom)"Fields"), fields_ref);
+  }
+
+  // Preparing Field and appending to the Fields array
+  t_pdvalue signature_field = pd_dict_new(enc->pool, 5);
+  t_pdvalue signature_field_ref = pd_xref_makereference(enc->xref, signature_field);
+  pd_array_add(fields.value.arrvalue, signature_field_ref);
+
+  //Enter paramaters to the /Field
+  //rt generate name
+  char t[] = "Sig_1";
+  pd_dict_put(signature_field, ((t_pdatom)"T"), pdstringvalue(pd_string_new(enc->pool, strlen(t), t)));
+  pd_dict_put(signature_field, ((t_pdatom)"FT"), pdatomvalue((t_pdatom)"Sig"));
+  pd_dict_put(signature_field, ((t_pdatom)"Type"), pdatomvalue((t_pdatom)"Annot"));
+  pd_dict_put(signature_field, ((t_pdatom)"SubType"), pdatomvalue((t_pdatom)"Widget"));
+  pd_dict_put(signature_field, ((t_pdatom)"F"), pdintvalue(132));
+
+  t_pdarray *field_rect_arr = pd_array_new(enc->pool, 4);
+  pd_array_add(field_rect_arr, pdintvalue(0));
+  pd_array_add(field_rect_arr, pdintvalue(0));
+  pd_array_add(field_rect_arr, pdintvalue(0));
+  pd_array_add(field_rect_arr, pdintvalue(0));
+  pd_dict_put(signature_field, ((t_pdatom)"Rect"), pdarrayvalue(field_rect_arr));
+
+  pd_dict_put(signature_field, ((t_pdatom)"P"), enc->currentPage);
+
+  //rt add to Annots array
+  //rt Add AP
+
+  // Preparing /V dictionary 
+  //rt - these are hardcoded for now
+  char reason[] = "Reason to sign document";
+  char location[] = "Somewhere over the rainbow";
+  char name[] = "Roman Toda";
+  char contact_info[] = "roman.toda@gmail.com";
+  char m[] = "D:20160428133243+02'00'";
+  char content[1024];
+
+  // calculating lenght of the Content just to have accurate size 
+  unsigned char random_buff[10];
+  int random_buff_size = 1;
+  int signature_length = 0;
+  signature_length = DigitaSignature_SigData(random_buff, random_buff_size, NULL);
+  signature_length = signature_length + 20;
+
+  t_pdvalue v_dict = pd_dict_new(enc->pool, 3);
+  pd_dict_put(v_dict, ((t_pdatom)"Contents"), pdstringvalue(pd_string_new_binary(enc->pool, signature_length, content)));
+  pd_dict_put(v_dict, ((t_pdatom)"Type"), pdatomvalue((t_pdatom)"Sig"));
+  pd_dict_put(v_dict, ((t_pdatom)"Filter"), pdatomvalue((t_pdatom)"Adobe.PPKLite"));
+  pd_dict_put(v_dict, ((t_pdatom)"SubFilter"), pdatomvalue((t_pdatom)"adbe.pkcs7.detached"));
+
+  t_pdarray *byterange_arr = pd_array_new(enc->pool, 4);
+  pd_array_add(byterange_arr, pdintvalue(2147483647));
+  pd_array_add(byterange_arr, pdintvalue(2147483647));
+  pd_array_add(byterange_arr, pdintvalue(2147483647));
+  pd_array_add(byterange_arr, pdintvalue(2147483647));
+  pd_dict_put(v_dict, ((t_pdatom)"ByteRange"), pdarrayvalue(byterange_arr));
+
+  pd_dict_put(v_dict, ((t_pdatom)"Reason"), pdstringvalue(pd_string_new(enc->pool, strlen(reason), reason)));
+  pd_dict_put(v_dict, ((t_pdatom)"Location"), pdstringvalue(pd_string_new(enc->pool, strlen(location), location)));
+  pd_dict_put(v_dict, ((t_pdatom)"Name"), pdstringvalue(pd_string_new(enc->pool, strlen(name), name)));
+  pd_dict_put(v_dict, ((t_pdatom)"ContactInfo"), pdstringvalue(pd_string_new(enc->pool, strlen(contact_info), contact_info)));
+  pd_dict_put(v_dict, ((t_pdatom)"M"), pdstringvalue(pd_string_new(enc->pool, strlen(m), m)));
+
+  // Insert V into the Filed dictionary
+  t_pdvalue v_dict_ref = pd_xref_makereference(enc->xref, v_dict);
+  pd_dict_put(signature_field, ((t_pdatom)"V"), v_dict_ref);
+  dig_sig_id = pd_reference_object_number(v_dict_ref);
+}
+
+void pdfr_encoder_end_digital_signature(FILE* pdf_file)
+{
+  // Reading V dictionary 
+  // going to calculate Byteranges and update ByteRange entry
+  // then sign the file and then update Contents
+
+  pduint32 offset1 = 0;
+  pduint32 length1 = 0;
+  pduint32 offset2 = 0;
+  pduint32 length2 = 0;
+
+  unsigned char buffer[5000];
+  fseek(pdf_file, 0L, SEEK_END);
+  length2 = ftell(pdf_file);
+  fseek(pdf_file, dig_sig_V_offset, SEEK_SET);
+  fread((unsigned char *)buffer, 1, sizeof(buffer), pdf_file);
+
+  char *p = strstr(buffer, "/Contents <");
+  length1 = dig_sig_V_offset + p - buffer + 10;
+  while (*p != '>') p++;
+  offset2 = dig_sig_V_offset + p - buffer+1;
+  length2 -= offset2;
+  p = strstr(buffer, "/ByteRange [");
+  fseek(pdf_file, dig_sig_V_offset+(p-buffer+12), SEEK_SET);
+
+  sprintf(buffer, "%d %d %d %d", offset1, length1, offset2, length2);
+  while (strlen(buffer) < 45) strcat(buffer, " ");
+  fwrite((unsigned char *)buffer, 1, strlen(buffer), pdf_file);
+
+  // buffer for data that we need to sign
+  unsigned char *buffer_to_sign = (unsigned char*)malloc(length1 + length2);
+
+  // preparing buffer for signature 
+  int signed_len_in_hex = offset2 - length1 - 2;
+  int signed_len_in_bytes = 0;
+
+  //// we will store signature here
+  unsigned char *signed_data = (unsigned char*)malloc(signed_len_in_hex);
+
+  //hex interpretation of signature. We must allocate space of ending \0
+  unsigned char *signed_data_hex = (unsigned char*)malloc(signed_len_in_hex + 1);
+  memset(signed_data_hex, 0, signed_len_in_hex + 1);
+  memset(signed_data, 0, signed_len_in_hex);
+
+  // reading file (except /Contents) to single buffer
+  // pdf defines 2 buffers from beginning of the file to the start 
+  // of empty space and then the rest 
+  fseek(pdf_file, offset1, SEEK_SET);
+  fread((unsigned char *)buffer_to_sign, 1, length1, pdf_file);
+  fseek(pdf_file, offset2, SEEK_SET);
+  fread((unsigned char *)(buffer_to_sign + length1), 1, length2, pdf_file);
+
+  // signing buffer with certificate
+  BIO* inputbio = BIO_new(BIO_s_mem());
+  BIO_write(inputbio, buffer_to_sign, (int)(length1 + length2));
+  PKCS7 *pkcs7;
+  int flags = PKCS7_DETACHED | PKCS7_BINARY;
+  pkcs7 = PKCS7_sign(digsig_cert, digsig_pkey, NULL, inputbio, flags);
+  BIO_free(inputbio);
+
+  // going to acquire encrypted data
+  if (pkcs7) {
+    BIO* outputbio = BIO_new(BIO_s_mem());
+    i2d_PKCS7_bio(outputbio, pkcs7);
+    BUF_MEM* mem = NULL;
+    BIO_get_mem_ptr(outputbio, &mem);
+    if (mem && mem->data && mem->length) {
+      // mem->length is supposed to be half of signed_len_in_hex
+      // because /Contents is written in hex (so 2 characters for each byte)
+      signed_len_in_bytes = mem->length;
+      memcpy(signed_data, mem->data, signed_len_in_bytes);
+    }
+    BIO_free(outputbio);
+    PKCS7_free(pkcs7);
+
+    // converting to hex
+    for (int i = 0; i < signed_len_in_bytes; i++)
+      sprintf((char*)&signed_data_hex[i * 2], "%02X", signed_data[i]);
+
+    // writing directly to /Content entry
+    fseek(pdf_file, offset1 + length1 + 1, SEEK_SET);
+    fwrite(signed_data_hex, 1, signed_len_in_bytes * 2, pdf_file);
+  }
+  free(buffer_to_sign);
+  free(signed_data);
+  free(signed_data_hex);
+}
+
+
 long pdfr_encoder_bytes_written(t_pdfrasencoder* enc)
 {
 	return pd_outstream_pos(enc->stm);
@@ -574,7 +850,6 @@ static int pdfr_sig_handler(t_pdoutstream *stm, void* cookie, PdfOutputEventCode
     return 0;
 }
 
-
 void pdfr_encoder_end_document(t_pdfrasencoder* enc)
 {
     t_pdoutstream* stm = enc->stm;
@@ -583,7 +858,7 @@ void pdfr_encoder_end_document(t_pdfrasencoder* enc)
     pd_outstream_set_event_handler(stm, PDF_EVENT_BEFORE_STARTXREF, pdfr_sig_handler, NULL);
 	pd_write_endofdocument(stm, enc->xref, enc->catalog, enc->info, enc->trailer);
 
-	// Note: we leave all the final data structures intact in case the client
+  // Note: we leave all the final data structures intact in case the client
 	// has questions, like 'how many pages did we write?' or 'how big was the output file?'.
 }
 
